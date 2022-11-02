@@ -37,7 +37,13 @@ func applyMessages(w io.Writer, msgs []*protogen.Message, opts Options) error {
 		}
 
 		glog.V(2).Infof("Processing %s", m.GoIdent.GoName)
-		if err := messageTemplate.Execute(w, tplMessage{
+		if err := unmarshalTemplate.Execute(w, tplMessage{
+			Message: m,
+			Options: opts,
+		}); err != nil {
+			return err
+		}
+		if err := marshalTemplate.Execute(w, tplMessage{
 			Message: m,
 			Options: opts,
 		}); err != nil {
@@ -74,7 +80,7 @@ import (
 )
 `))
 
-	messageTemplate = template.Must(template.New("message").Parse(`
+	marshalTemplate = template.Must(template.New("marshal").Parse(`
 // MarshalJSON implements json.Marshaler
 func (msg *{{.GoIdent.GoName}}) MarshalJSON() ([]byte,error) {
 	return protojson.MarshalOptions {
@@ -82,8 +88,9 @@ func (msg *{{.GoIdent.GoName}}) MarshalJSON() ([]byte,error) {
 		EmitUnpopulated: {{.EmitDefaults}},
 		UseProtoNames: {{.OrigName}},
 	}.Marshal(msg)
-}
+}`))
 
+	unmarshalTemplate = template.Must(template.New("unmarshal").Parse(`
 // UnmarshalJSON implements json.Unmarshaler
 func (msg *{{.GoIdent.GoName}}) UnmarshalJSON(b []byte) error {
 	return protojson.UnmarshalOptions {
