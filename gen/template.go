@@ -21,6 +21,11 @@ type Options struct {
 	AllowUnknownFields bool
 }
 
+// TODO: Some field kinds require different libraries (ie "encoding/json" to escape strings),
+// or "strconv" to convert ints to strings), but if a library is important and not used we'll
+// get yelled at. Need to dynamically determine which libraries are required depending on the
+// protobuf being templated.
+
 // This function is called with a param which contains the entire definition of a method.
 func ApplyTemplate(w io.Writer, f *protogen.File, opts Options) error {
 
@@ -85,26 +90,58 @@ func (msg *{{.GoIdent.GoName}}) MarshalJSON() ([]byte,error) {
 	// General guidelines:
 	// 1. Prefer strconv functions over string formatting ones
 	// 2. Use a string builder to join strings
-	// 3. Don't worry about json formatting, since our main use case is hubble exporter
+	// 3. Don't worry about json indent formatting, since our main use case is hubble exporter
 	//    which is consumed by some other logging/storage service
 
+	// Helper functions
 	addComma := func() {
 		sb.WriteString(`buf.WriteString(",")` + "\n")
 	}
+	wrapString := func(wrapped string) string {
+		return fmt.Sprintf(
+			`buf.WriteString("\"")`+"\n\t%s\n\t"+`buf.WriteString("\"")`,
+			wrapped,
+		)
+	}
+	useMarshal := func(toMarshal string) string {
+		return fmt.Sprintf(
+			"res, err := json.Marshal(%s)\n\tif err != nil { return buf.Bytes(), err }\n\tbuf.Write(res)",
+			toMarshal,
+		)
+	}
+	getKindComment := func(kind protoreflect.Kind) string {
+		return fmt.Sprintf("// %s", kind.GoString())
+	}
+
+	// Each string in this slice represents the line(s) of go code to write in order to
+	// add a field into the json map.
+	// This format makes it easier to put commas in the correct locations.
+	templatedFields := []string{}
 
 	// handleDecodeField handles anything that isn't "special"
 	handleDecodeField := func(f *protogen.Field) {
 		fieldKind := f.Desc.Kind()
 		fieldJsonName := f.Desc.JSONName()
 		fieldGoTitleName := titler.String(f.GoName)
-		fieldValue := `"\"\""`
+		fieldGoGetter := fmt.Sprintf("msg.Get%s()", fieldGoTitleName)
+		fieldValue := `buf.WriteString("\"\"")`
 		switch fieldKind {
 		case protoreflect.BoolKind:
-			fieldValue = fmt.Sprintf("strconv.FormatBool(msg.Get%s())", fieldGoTitleName)
+			fieldValue = fmt.Sprintf("buf.WriteString(strconv.FormatBool(%s))", fieldGoGetter)
+		case protoreflect.StringKind:
+			fieldValue = useMarshal(fieldGoGetter)
+		case protoreflect.BytesKind:
+			fieldValue = wrapString(fmt.Sprintf("buf.WriteString(base64.StdEncoding.EncodeToString(%s))", fieldGoGetter))
+		case protoreflect.Int32Kind:
+			fieldValue = fmt.Sprintf("buf.WriteString(strconv.Itoa(int(%s)))", fieldGoGetter)
+		case protoreflect.Int64Kind:
+			fieldValue = wrapString(fmt.Sprintf("buf.WriteString(strconv.Itoa(int(%s)))", fieldGoGetter))
+		case protoreflect.DoubleKind, protoreflect.FloatKind:
+			fieldValue = useMarshal(fieldGoGetter)
 		}
-		sb.WriteString(fmt.Sprintf(
-			"\t"+`buf.WriteString("%s:")`+"\n"+`buf.WriteString(%s)`+"\n",
-			fieldJsonName, fieldValue,
+		templatedFields = append(templatedFields, fmt.Sprintf(
+			"\t%s\n\t"+`buf.WriteString("\"%s\":")`+"\n\t%s\n\t",
+			getKindComment(fieldKind), fieldJsonName, fieldValue,
 		))
 	}
 
@@ -120,8 +157,6 @@ func (msg *{{.GoIdent.GoName}}) MarshalJSON() ([]byte,error) {
 	handleDecodeExtension := func(f *protogen.Extension) {
 	}
 
-	sb.WriteString(funcStart)
-
 	// Message.Fields will contain every numbered field in a message, which makes it more difficult to just
 	// use a single for loop over all fields.
 	// For instance, if there is an Oneof in the message, than all possible values in the Oneof will be added
@@ -133,7 +168,6 @@ func (msg *{{.GoIdent.GoName}}) MarshalJSON() ([]byte,error) {
 			continue
 		}
 		handleDecodeField(field)
-		addComma()
 	}
 	for _, oneof := range msg.Message.Oneofs {
 		handleDecodeOneof(oneof)
@@ -146,6 +180,16 @@ func (msg *{{.GoIdent.GoName}}) MarshalJSON() ([]byte,error) {
 	}
 	for _, ext := range msg.Message.Extensions {
 		handleDecodeExtension(ext)
+	}
+
+	// Write the template out
+	sb.WriteString(funcStart)
+	numLines := len(templatedFields)
+	for i, line := range templatedFields {
+		sb.WriteString(line)
+		if i != numLines-1 {
+			addComma()
+		}
 	}
 	sb.WriteString(funcEnd)
 	return sb.String()
@@ -171,6 +215,8 @@ package {{.GoPackageName}}
 import (
 	"bytes"
 	"strconv"
+	"encoding/base64"
+	"encoding/json"
 
 	"google.golang.org/protobuf/encoding/protojson"
 )
