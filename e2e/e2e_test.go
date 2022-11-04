@@ -2,81 +2,57 @@ package e2e
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func TestTable(t *testing.T) {
-	type basicWrapper struct{ Basic }
-	var cases = []struct {
-		Name string
+// FuzzE2E creates instances of the Basic protobuf from e2e.proto, and ensures that marshalling and
+// unmarshalling each instance using both protojson and the generated MarshalJson method, results in
+// the same protobuf.
+func FuzzE2E(f *testing.F) {
+	// Seed items
+	f.Add("fuzz", int32(1234), true, []byte("fuzz"), int64(1234))
+	f.Add("hello world", int32(0), false, []byte("asdf"), int64(0))
+	f.Add("", int32(2^32), false, []byte(""), int64(2^64))
+	f.Fuzz(func(t *testing.T, a string, b int32, c bool, d []byte, e int64) {
+		basic := &Basic{
+			A: a,
+			B: b,
+			C: c,
+			D: d,
+			E: e,
+		}
 
-		// Value and Expected MUST be pointers to structs. If Expected is
-		// nil, then it is expected to be identical to Value.
-		Value    interface{}
-		Expected interface{}
-	}{
-		{
-			"basic",
-			&Basic{
-				A: "hello",
-				B: &Basic_Int{
-					Int: 42,
-				},
-			},
-			nil,
-		},
+		basicMarshalUsingJson, err := json.Marshal(basic)
+		if err != nil {
+			t.Errorf("unable to marshal (json): %#v, %v", basic, err)
+			t.FailNow()
+		}
+		basicUnmarshalledUsingJson := &Basic{}
+		err = json.Unmarshal(basicMarshalUsingJson, basicUnmarshalledUsingJson)
+		if err != nil {
+			t.Errorf("unable to unmarshal (json): %q, %v", basicMarshalUsingJson, err)
+			t.FailNow()
+		}
 
-		{
-			"basic wrapped in Go struct",
-			&basicWrapper{
-				Basic: Basic{
-					A: "hello",
-					B: &Basic_Int{
-						Int: 42,
-					},
-				},
-			},
-			nil,
-		},
+		// TODO: protojson doesn't handle strings that have invalid utf-8 characters in them, but
+		// encoding/json does.
+		basicMarshalUsingProtoJson, err := protojson.Marshal(basic)
+		if err != nil {
+			t.Errorf("unable to marshal (protojson): %#v, %v", basic, err)
+			t.FailNow()
+		}
+		basicUnmarshalledUsingProtoJson := &Basic{}
+		err = protojson.Unmarshal(basicMarshalUsingProtoJson, basicUnmarshalledUsingProtoJson)
+		if err != nil {
+			t.Errorf("unable to unmarshal (protojson): %q, %v", basicUnmarshalledUsingProtoJson, err)
+			t.FailNow()
+		}
 
-		{
-			"nested",
-			&Nested_Message{
-				Basic: &Basic{
-					A: "hello",
-					B: &Basic_Int{
-						Int: 42,
-					},
-				},
-			},
-			nil,
-		},
-	}
-
-	for _, tt := range cases {
-		t.Run(tt.Name, func(t *testing.T) {
-			require := require.New(t)
-
-			// Verify marshaling doesn't error
-			bs, err := json.Marshal(tt.Value)
-			require.NoError(err)
-			require.NotEmpty(bs)
-
-			// Determine what we expect the result to be
-			expected := tt.Expected
-			if expected == nil {
-				expected = tt.Value
-			}
-
-			// Unmarshal. We want to do this into a concrete type so we
-			// use reflection here (you can't just decode into interface{})
-			// and have that work.
-			val := reflect.New(reflect.ValueOf(expected).Elem().Type())
-			require.NoError(json.Unmarshal(bs, val.Interface()))
-			require.Equal(val.Interface(), expected)
-		})
-	}
+		if basicUnmarshalledUsingJson.String() != basicUnmarshalledUsingProtoJson.String() {
+			t.Errorf("no match between json and protojson: %s, %s", basicUnmarshalledUsingJson.String(), basicUnmarshalledUsingProtoJson.String())
+			t.FailNow()
+		}
+	})
 }

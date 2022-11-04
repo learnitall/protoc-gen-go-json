@@ -8,18 +8,13 @@ option go_package = ".;e2e";
 // generally work automatically with encoding/json.
 message Basic {
   string a = 1;
-
-  oneof b {
-    int32  int = 2;
-    string str = 3;
-  }
-
-  map<string, string> map = 4;
-}
-
-// Test nested types
-message Nested {
-  message Message {
-    Basic basic = 1;
+  int32 b = 2;
+  bool c = 3;
+  bytes d = 4;
+  int64 e = 5;
+  oneof k {
+    string str = 6;
+    int32 int = 7;
+    bool bol = 8;
   }
 }
