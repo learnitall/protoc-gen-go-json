@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/golang/glog"
-	"github.com/mitchellh/protoc-gen-go-json/gen"
 	"google.golang.org/protobuf/compiler/protogen"
 )
 
@@ -24,7 +23,7 @@ func main() {
 		ParamFunc: flag.CommandLine.Set,
 	}.Run(func(gp *protogen.Plugin) error {
 
-		opts := gen.Options{
+		opts := RenderOptions{
 			EnumsAsInts:        *enumsAsInts,
 			EmitDefaults:       *emitDefaults,
 			OrigName:           *origName,
@@ -44,7 +43,7 @@ func main() {
 
 			gf := gp.NewGeneratedFile(fmt.Sprintf("%s.pb.json.go", f.GeneratedFilenamePrefix), f.GoImportPath)
 
-			err := gen.ApplyTemplate(gf, f, opts)
+			err := RenderJsonSerialFuncs(gf, f, opts)
 			if err != nil {
 				gf.Skip()
 				gp.Error(err)

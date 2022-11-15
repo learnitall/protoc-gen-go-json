@@ -1,9 +1,9 @@
-module github.com/mitchellh/protoc-gen-go-json
+module github.com/learnitall/protoc-gen-go-json
 
 go 1.18
 
 require (
-	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
+	github.com/golang/glog v1.0.0
 	golang.org/x/text v0.4.0
 	google.golang.org/protobuf v1.28.1
 )
