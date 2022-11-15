@@ -1,3 +1,4 @@
 build
 protoc-gen-go-json*
 e2e/*.pb.go
+e2e/*.pb.json.go
